@@ -21,6 +21,12 @@ import "@solana/wallet-adapter-react-ui/styles.css";
 const queryClient = new QueryClient();
 
 export default function Providers({ children }: { children: React.ReactNode }) {
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // Solana Config
   const network = WalletAdapterNetwork.Mainnet;
   const endpoint = useMemo(() => clusterApiUrl(network), [network]);
@@ -31,6 +37,8 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     ],
     []
   );
+
+  if (!mounted) return null;
 
   return (
     <WagmiProvider config={config}>

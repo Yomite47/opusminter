@@ -19,5 +19,5 @@ export const config = getDefaultConfig({
     zora,
     arbitrum
   ],
-  ssr: true,
+  ssr: false, // Disable SSR to avoid indexedDB errors during build
 });
