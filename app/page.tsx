@@ -264,7 +264,7 @@ export default function Home() {
               type="text" 
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              className="flex-1 bg-neutral-900 border border-neutral-800 rounded px-4 py-3 focus:outline-none focus:border-emerald-500 transition-colors"
+              className="flex-1 bg-neutral-900 border border-neutral-800 rounded px-4 py-3 text-base focus:outline-none focus:border-emerald-500 transition-colors"
               placeholder="https://..."
             />
           </div>
