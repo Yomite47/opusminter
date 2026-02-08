@@ -8,10 +8,10 @@ import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { VersionedTransaction, Transaction, SystemProgram, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 // EVM
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useSendTransaction, useWaitForTransactionReceipt, useWalletClient } from 'wagmi';
+import { useAccount, useSendTransaction, useWalletClient } from 'wagmi';
 import { parseEther } from 'viem';
 
-import { Loader2, CheckCircle, AlertCircle, Coins, Wallet } from "lucide-react";
+import { Loader2, AlertCircle, Coins } from "lucide-react";
 
 // --- Configuration ---
 const CREATOR_WALLET_SOL = "FJLZ1yc4G9WyVZ56ST23rQa72Zjvmn5RtaFRu9j4eLY3"; // Your Solana Wallet
@@ -19,13 +19,19 @@ const CREATOR_WALLET_EVM = "0xcb52f0fe1d559cd2869db7f29753e8951381b4a3"; // REPL
 const FEE_AMOUNT_SOL = 0.005; // ~$1
 const FEE_AMOUNT_ETH = 0.0005; // ~$1.50
 
+interface ChallengeData {
+    apiBase: string;
+    walletAddr: string;
+    challengeId: string;
+}
+
 export default function Home() {
   // Solana State
   const { connection } = useConnection();
   const { publicKey: solPublicKey, sendTransaction: sendSolTx, signTransaction: signSolTx } = useWallet();
 
   // EVM State
-  const { address: evmAddress, isConnected: isEvmConnected, chain: evmChain } = useAccount();
+  const { address: evmAddress, isConnected: isEvmConnected } = useAccount();
   const { sendTransactionAsync: sendEvmTx } = useSendTransaction();
   const { data: walletClient } = useWalletClient();
 
@@ -33,18 +39,17 @@ export default function Home() {
   const [url, setUrl] = useState("https://chum-production.up.railway.app/api/villain/skill.md");
   const [logs, setLogs] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
   const [mode, setMode] = useState<"solana" | "evm">("solana"); // Toggle modes
 
   // Manual Challenge Solver State
   const [manualChallenge, setManualChallenge] = useState<string | null>(null);
   const [manualAnswer, setManualAnswer] = useState("");
-  const [challengeData, setChallengeData] = useState<any>(null); // Store challenge context for manual submission
+  const [challengeData, setChallengeData] = useState<ChallengeData | null>(null); // Store challenge context for manual submission
 
   const log = (msg: string) => setLogs((prev) => [...prev, msg]);
 
   // Helper: Fetch via Proxy to avoid CORS
-  const fetchProxy = async (targetUrl: string, options: any = {}) => {
+  const fetchProxy = async (targetUrl: string, options: RequestInit = {}) => {
       const res = await fetch('/api/proxy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -52,7 +57,7 @@ export default function Home() {
               url: targetUrl,
               method: options.method || 'GET',
               headers: options.headers || {},
-              body: options.body ? JSON.parse(options.body) : undefined // Unpack stringified body if present
+              body: options.body ? JSON.parse(options.body as string) : undefined // Unpack stringified body if present
           })
       });
       if (!res.ok) {
@@ -76,7 +81,6 @@ export default function Home() {
 
     setLoading(true);
     setLogs([]);
-    setStatus("idle");
     setManualChallenge(null); // Reset manual state
     setManualAnswer("");
 
@@ -91,7 +95,8 @@ export default function Home() {
       const match = text.match(/^---\n([\s\S]*?)\n---/);
       if (!match) throw new Error("Invalid SKILL.md: No frontmatter. Ensure this is a valid Agent Mint URL.");
       
-      const config: any = {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const config: Record<string, any> = {};
       match[1].split('\n').forEach(line => {
         const [key, ...valParts] = line.split(':');
         if (key && valParts.length) {
@@ -122,7 +127,7 @@ export default function Home() {
       let cData;
       try {
           cData = JSON.parse(cText);
-      } catch (e) {
+      } catch {
           throw new Error(`API Error (Not JSON): ${cText.substring(0, 100)}...`);
       }
       
@@ -164,12 +169,14 @@ export default function Home() {
         // If solved, proceed to submit immediately
         await submitAnswer(apiBase, walletAddr!, cData.challengeId, answer);
 
-      } catch (err: any) {
-         if (err.message === "Unknown challenge type") {
+      } catch (err: unknown) {
+         if (err instanceof Error && err.message === "Unknown challenge type") {
              // FALLBACK: Ask user to solve it manually
              log(`⚠️ Unknown Challenge Type! Requesting Manual Input...`);
              setManualChallenge(challenge);
-             setChallengeData({ apiBase, walletAddr, challengeId: cData.challengeId });
+             if (walletAddr) {
+                 setChallengeData({ apiBase, walletAddr, challengeId: cData.challengeId });
+             }
              setLoading(false); // Stop loading spinner so user can interact
              return; // Exit and wait for user input
          } else {
@@ -177,30 +184,30 @@ export default function Home() {
          }
       }
 
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      log(`❌ Error: ${e.message}`);
-      setStatus("error");
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      log(`❌ Error: ${errorMessage}`);
       setLoading(false);
     }
   };
 
   const submitManualAnswer = async () => {
-      if (!manualAnswer) return;
+      if (!manualAnswer || !challengeData) return;
       setLoading(true);
       try {
           await submitAnswer(challengeData.apiBase, challengeData.walletAddr, challengeData.challengeId, manualAnswer);
           setManualChallenge(null); // Clear manual mode
-      } catch (e: any) {
+      } catch (e: unknown) {
           console.error(e);
-          log(`❌ Error: ${e.message}`);
-          setStatus("error");
+          const errorMessage = e instanceof Error ? e.message : String(e);
+          log(`❌ Error: ${errorMessage}`);
       } finally {
           setLoading(false);
       }
   };
 
-  const submitAnswer = async (apiBase: string, walletAddr: string, challengeId: string, answer: any) => {
+  const submitAnswer = async (apiBase: string, walletAddr: string, challengeId: string, answer: string | number) => {
       // 5. Submit Answer
       log("📤 Submitting...");
       const mRes = await fetchProxy(`${apiBase}/villain/agent-mint`, {
@@ -272,7 +279,7 @@ export default function Home() {
           }
       }
 
-      setStatus("success");
+      // setStatus("success"); // Removed as per cleanup
   };
 
   return (
@@ -341,7 +348,7 @@ export default function Home() {
                     <div>
                         <h3 className="font-bold text-yellow-500">Manual Solver Required</h3>
                         <p className="text-sm text-yellow-200/80">
-                            The agent sent a challenge I don't know how to solve automatically.
+                            The agent sent a challenge I don&apos;t know how to solve automatically.
                         </p>
                         <div className="mt-2 bg-black/50 p-2 rounded text-yellow-100 font-mono text-sm border border-yellow-900/50">
                             {manualChallenge}
