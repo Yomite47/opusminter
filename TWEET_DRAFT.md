@@ -24,6 +24,7 @@ This tool automates that verification process, allowing you to mint instantly on
 **✨ 3/ Features:**
 ✅ **Multi-Chain:** Switch seamlessly between Solana and EVM mode.
 ✅ **Auto-Solver:** Instantly solves Math and ROT13 challenges.
+✅ **Human-Mode:** Unknown challenge? The UI pauses and lets you solve it manually. Works for ANY agent.
 ✅ **Safe:** Non-custodial. Your Private Keys **NEVER** leave your wallet.
 ✅ **Secure:** We use safe sandboxed evaluation for math problems. No arbitrary code execution.
 
