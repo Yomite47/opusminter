@@ -53,23 +53,48 @@ export default function Home() {
 
   const log = (msg: string) => setLogs((prev) => [...prev, msg]);
 
-  // Helper: Fetch via Proxy to avoid CORS
-  const fetchProxy = async (targetUrl: string, options: RequestInit = {}) => {
-      const res = await fetch('/api/proxy', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-              url: targetUrl,
-              method: options.method || 'GET',
-              headers: options.headers || {},
-              body: options.body ? JSON.parse(options.body as string) : undefined // Unpack stringified body if present
-          })
-      });
-      if (!res.ok) {
-          const errText = await res.text();
-          throw new Error(`Proxy Error (${res.status}): ${errText}`);
+  // Helper: Fetch via Proxy to avoid CORS (with Retry Logic)
+  const fetchProxy = async (targetUrl: string, options: RequestInit = {}, retries = 5, delay = 2000) => {
+      for (let i = 0; i <= retries; i++) {
+          try {
+              const res = await fetch('/api/proxy', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                      url: targetUrl,
+                      method: options.method || 'GET',
+                      headers: options.headers || {},
+                      body: options.body ? JSON.parse(options.body as string) : undefined
+                  })
+              });
+
+              if (!res.ok) {
+                  const errText = await res.text();
+                  // Check for 429 explicitly or 500 containing 429/Too Many Requests
+                  const isRateLimit = res.status === 429 || errText.includes("429") || errText.includes("Too Many Requests");
+                  
+                  if (isRateLimit && i < retries) {
+                      log(`⚠️ RPC Rate Limit detected. Retrying in ${delay/1000}s... (Attempt ${i+1}/${retries})`);
+                      await new Promise(r => setTimeout(r, delay));
+                      delay *= 1.5; // Backoff
+                      continue; 
+                  }
+                  
+                  throw new Error(`Proxy Error (${res.status}): ${errText}`);
+              }
+              return res;
+          } catch (err: any) {
+             // Only retry on rate limits or if it's the last attempt rethrow
+             if (i < retries && (err.message.includes("429") || err.message.includes("Too Many Requests"))) {
+                 log(`⚠️ RPC Busy. Retrying in ${delay/1000}s...`);
+                 await new Promise(r => setTimeout(r, delay));
+                 delay *= 1.5;
+                 continue;
+             }
+             throw err;
+          }
       }
-      return res;
+      throw new Error("Max retries exceeded");
   };
 
   // --- Logic from CLI (Ported) ---
