@@ -288,6 +288,10 @@ export default function Home() {
           
           // Fee
           log(`💰 Sending ${FEE_AMOUNT_SOL} SOL Fee...`);
+          
+          // Get blockhash explicitly for better confirmation handling
+          const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+          
           const feeTx = new Transaction().add(
             SystemProgram.transfer({
               fromPubkey: solPublicKey!,
@@ -295,9 +299,33 @@ export default function Home() {
               lamports: FEE_AMOUNT_SOL * LAMPORTS_PER_SOL,
             })
           );
+          
+          // Assign blockhash manually to ensure we track the right one
+          feeTx.recentBlockhash = blockhash;
+          feeTx.feePayer = solPublicKey!;
+
           const feeSig = await sendSolTx(feeTx, connection);
-          await connection.confirmTransaction(feeSig);
-          log("✅ Fee Paid!");
+          
+          log("⏳ Confirming Fee...");
+          
+          try {
+             await connection.confirmTransaction({
+                 signature: feeSig,
+                 blockhash,
+                 lastValidBlockHeight
+             }, 'confirmed');
+             log("✅ Fee Paid!");
+          } catch (err: any) {
+             // If confirmation times out, check if it actually landed
+             log("⚠️ Confirmation timed out. Checking status...");
+             await new Promise(r => setTimeout(r, 2000));
+             const status = await connection.getSignatureStatus(feeSig);
+             if (status.value?.confirmationStatus === 'confirmed' || status.value?.confirmationStatus === 'finalized') {
+                 log("✅ Fee Paid (Recovered)!");
+             } else {
+                 throw new Error(`Fee transaction failed or timed out: ${err.message}`);
+             }
+          }
 
           // Mint
           log("🚀 Executing Mint...");
