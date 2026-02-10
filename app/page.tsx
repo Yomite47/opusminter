@@ -308,23 +308,34 @@ export default function Home() {
           
           log("⏳ Confirming Fee...");
           
-          try {
-             await connection.confirmTransaction({
-                 signature: feeSig,
-                 blockhash,
-                 lastValidBlockHeight
-             }, 'confirmed');
-             log("✅ Fee Paid!");
-          } catch (err: any) {
-             // If confirmation times out, check if it actually landed
-             log("⚠️ Confirmation timed out. Checking status...");
-             await new Promise(r => setTimeout(r, 2000));
-             const status = await connection.getSignatureStatus(feeSig);
-             if (status.value?.confirmationStatus === 'confirmed' || status.value?.confirmationStatus === 'finalized') {
-                 log("✅ Fee Paid (Recovered)!");
-             } else {
-                 throw new Error(`Fee transaction failed or timed out: ${err.message}`);
-             }
+          // Manual polling loop for confirmation (Robust for congested network)
+          let confirmed = false;
+          const startTime = Date.now();
+          
+          while (!confirmed && Date.now() - startTime < 60000) { // 60s timeout
+              const status = await connection.getSignatureStatus(feeSig);
+              
+              if (status.value?.confirmationStatus === 'confirmed' || status.value?.confirmationStatus === 'finalized') {
+                  confirmed = true;
+                  log("✅ Fee Paid!");
+                  break;
+              }
+              
+              if (status.value?.err) {
+                  throw new Error(`Transaction failed: ${JSON.stringify(status.value.err)}`);
+              }
+              
+              await new Promise(r => setTimeout(r, 2000)); // Check every 2s
+          }
+          
+          if (!confirmed) {
+              // Final check before giving up
+              const status = await connection.getSignatureStatus(feeSig);
+              if (status.value?.confirmationStatus === 'confirmed' || status.value?.confirmationStatus === 'finalized') {
+                   log("✅ Fee Paid (Recovered)!");
+              } else {
+                   throw new Error(`Transaction confirmation timed out. Check Explorer: https://solscan.io/tx/${feeSig}`);
+              }
           }
 
           // Mint
