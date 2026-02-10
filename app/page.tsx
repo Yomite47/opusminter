@@ -70,11 +70,13 @@ export default function Home() {
 
               if (!res.ok) {
                   const errText = await res.text();
-                  // Check for 429 explicitly or 500 containing 429/Too Many Requests
-                  const isRateLimit = res.status === 429 || errText.includes("429") || errText.includes("Too Many Requests");
+                  // Check for 429 (Rate Limit) or 503 (Service Unavailable)
+                  const isRateLimit = res.status === 429 || res.status === 503 || 
+                                      errText.includes("429") || errText.includes("503") || 
+                                      errText.includes("Too Many Requests") || errText.includes("Service temporarily unavailable");
                   
                   if (isRateLimit && i < retries) {
-                      log(`⚠️ RPC Rate Limit detected. Retrying in ${delay/1000}s... (Attempt ${i+1}/${retries})`);
+                      log(`⚠️ Server Busy (${res.status}). Retrying in ${delay/1000}s... (Attempt ${i+1}/${retries})`);
                       await new Promise(r => setTimeout(r, delay));
                       delay *= 1.5; // Backoff
                       continue; 
@@ -85,8 +87,8 @@ export default function Home() {
               return res;
           } catch (err: any) {
              // Only retry on rate limits or if it's the last attempt rethrow
-             if (i < retries && (err.message.includes("429") || err.message.includes("Too Many Requests"))) {
-                 log(`⚠️ RPC Busy. Retrying in ${delay/1000}s...`);
+             if (i < retries && (err.message.includes("429") || err.message.includes("503") || err.message.includes("Too Many Requests"))) {
+                 log(`⚠️ Server Busy. Retrying in ${delay/1000}s...`);
                  await new Promise(r => setTimeout(r, delay));
                  delay *= 1.5;
                  continue;
