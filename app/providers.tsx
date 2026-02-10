@@ -29,7 +29,15 @@ export default function Providers({ children }: { children: React.ReactNode }) {
 
   // Solana Config
   const network = WalletAdapterNetwork.Mainnet;
-  const endpoint = useMemo(() => clusterApiUrl(network), [network]);
+  const [endpoint, setEndpoint] = React.useState(clusterApiUrl(network));
+
+  React.useEffect(() => {
+    const customRpc = localStorage.getItem("custom_rpc_url");
+    if (customRpc) {
+        setEndpoint(customRpc);
+    }
+  }, []);
+
   const wallets = useMemo(
     () => [
       new PhantomWalletAdapter(),

@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState } from "react";
@@ -18,14 +19,8 @@ const CREATOR_WALLET_EVM = "0xcb52f0fe1d559cd2869db7f29753e8951381b4a3"; // REPL
 const FEE_AMOUNT_SOL = 0.005; // ~$1
 const FEE_AMOUNT_ETH = 0.0005; // ~$1.50
 
-interface Endpoints {
-    challenge: string;
-    mint: string;
-    execute: string | null;
-}
-
 interface ChallengeData {
-    endpoints: Endpoints;
+    apiBase: string;
     walletAddr: string;
     challengeId: string;
 }
@@ -42,23 +37,9 @@ export default function Home() {
 
   // UI State
   const [url, setUrl] = useState("https://chum-production.up.railway.app/api/villain/skill.md");
-  const [rpcUrl, setRpcUrl] = useState(""); // Custom RPC
   const [logs, setLogs] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<"solana" | "evm">("solana"); // Toggle modes
-
-  // Load RPC from storage
-  useState(() => {
-      if (typeof window !== 'undefined') {
-          const stored = localStorage.getItem("custom_rpc_url");
-          if (stored) setRpcUrl(stored);
-      }
-  });
-
-  const saveRpc = (val: string) => {
-      setRpcUrl(val);
-      localStorage.setItem("custom_rpc_url", val);
-  };
 
   // Manual Challenge Solver State
   const [manualChallenge, setManualChallenge] = useState<string | null>(null);
@@ -67,50 +48,23 @@ export default function Home() {
 
   const log = (msg: string) => setLogs((prev) => [...prev, msg]);
 
-  // Helper: Fetch via Proxy to avoid CORS (with Retry Logic)
-  const fetchProxy = async (targetUrl: string, options: RequestInit = {}, retries = 5, delay = 2000) => {
-      for (let i = 0; i <= retries; i++) {
-          try {
-              const res = await fetch('/api/proxy', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                      url: targetUrl,
-                      method: options.method || 'GET',
-                      headers: options.headers || {},
-                      body: options.body ? JSON.parse(options.body as string) : undefined
-                  })
-              });
-
-              if (!res.ok) {
-                  const errText = await res.text();
-                  // Check for 429 (Rate Limit) or 503 (Service Unavailable)
-                  const isRateLimit = res.status === 429 || res.status === 503 || 
-                                      errText.includes("429") || errText.includes("503") || 
-                                      errText.includes("Too Many Requests") || errText.includes("Service temporarily unavailable");
-                  
-                  if (isRateLimit && i < retries) {
-                      log(`⚠️ Server Busy (${res.status}). Retrying in ${delay/1000}s... (Attempt ${i+1}/${retries})`);
-                      await new Promise(r => setTimeout(r, delay));
-                      delay *= 1.5; // Backoff
-                      continue; 
-                  }
-                  
-                  throw new Error(`Proxy Error (${res.status}): ${errText}`);
-              }
-              return res;
-          } catch (err: any) {
-             // Only retry on rate limits or if it's the last attempt rethrow
-             if (i < retries && (err.message.includes("429") || err.message.includes("503") || err.message.includes("Too Many Requests"))) {
-                 log(`⚠️ Server Busy. Retrying in ${delay/1000}s...`);
-                 await new Promise(r => setTimeout(r, delay));
-                 delay *= 1.5;
-                 continue;
-             }
-             throw err;
-          }
+  // Helper: Fetch via Proxy to avoid CORS
+  const fetchProxy = async (targetUrl: string, options: RequestInit = {}) => {
+      const res = await fetch('/api/proxy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+              url: targetUrl,
+              method: options.method || 'GET',
+              headers: options.headers || {},
+              body: options.body ? JSON.parse(options.body as string) : undefined // Unpack stringified body if present
+          })
+      });
+      if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Proxy Error (${res.status}): ${errText}`);
       }
-      throw new Error("Max retries exceeded");
+      return res;
   };
 
   // --- Logic from CLI (Ported) ---
@@ -137,57 +91,32 @@ export default function Home() {
       const res = await fetchProxy(url);
       const text = await res.text();
 
-      // 2. Parse Metadata & Endpoints
-      let config: Record<string, any> = {};
-      let endpoints: Endpoints = {
-          challenge: "",
-          mint: "",
-          execute: null
-      };
-
+      // 2. Parse Metadata
       const match = text.match(/^---\n([\s\S]*?)\n---/);
-      if (match) {
-        match[1].split('\n').forEach(line => {
-            const [key, ...valParts] = line.split(':');
-            if (key && valParts.length) {
-                let val = valParts.join(':').trim();
-                if (val.startsWith('{') || val.startsWith('[')) {
-                    try { val = JSON.parse(val); } catch {}
-                }
-                config[key.trim()] = val;
-            }
-        });
-        const apiBase = config.metadata?.api_base;
-        if (apiBase) {
-            endpoints.challenge = `${apiBase}/villain/challenge`;
-            endpoints.mint = `${apiBase}/villain/agent-mint`;
+      if (!match) throw new Error("Invalid SKILL.md: No frontmatter. Ensure this is a valid Agent Mint URL.");
+      
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const config: Record<string, any> = {};
+      match[1].split('\n').forEach(line => {
+        const [key, ...valParts] = line.split(':');
+        if (key && valParts.length) {
+          let val = valParts.join(':').trim();
+          if (val.startsWith('{') || val.startsWith('[')) {
+             try { val = JSON.parse(val); } catch {}
+          }
+          config[key.trim()] = val;
         }
-      }
+      });
 
-      // Fallback: Scan text for endpoints if missing
-      if (!endpoints.challenge) {
-           log("⚠️ No standard metadata. Scanning text for endpoints...");
-           const baseUrlMatch = text.match(/Base URL:\s*(https?:\/\/[^\s]+)/i);
-           const apiBase = baseUrlMatch ? baseUrlMatch[1] : null;
-
-           const challengeMatch = text.match(/POST\s+(https?:\/\/[^\s]+\/challenge)/i);
-           endpoints.challenge = challengeMatch ? challengeMatch[1] : (apiBase ? `${apiBase}/api/challenge` : "");
-
-           const mintMatch = text.match(/POST\s+(https?:\/\/[^\s]+\/mint)/i);
-           endpoints.mint = mintMatch ? mintMatch[1] : (apiBase ? `${apiBase}/api/mint` : "");
-
-           const executeMatch = text.match(/POST\s+(https?:\/\/[^\s]+\/execute)/i);
-           if (executeMatch) endpoints.execute = executeMatch[1];
-      }
-
-      if (!endpoints.challenge) throw new Error("Could not determine API endpoints from SKILL.md");
-      log(`✅ Challenge Endpoint: ${endpoints.challenge}`);
+      const apiBase = config.metadata?.api_base;
+      if (!apiBase) throw new Error("No api_base found in metadata. This agent does not follow the Villain Minting Standard.");
+      log(`✅ API Base: ${apiBase}`);
 
       // 3. Get Challenge
       log("🤖 Requesting Challenge...");
       const walletAddr = mode === "solana" ? solPublicKey?.toBase58() : evmAddress;
       
-      const cRes = await fetchProxy(endpoints.challenge, {
+      const cRes = await fetchProxy(`${apiBase}/villain/challenge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ walletAddress: walletAddr, chain: mode }) // Added chain param if API supports it
@@ -238,7 +167,7 @@ export default function Home() {
         }
         log(`✅ Answer: ${answer}`);
         // If solved, proceed to submit immediately
-        await submitAnswer(endpoints, walletAddr!, cData.challengeId, answer);
+        await submitAnswer(apiBase, walletAddr!, cData.challengeId, answer);
 
       } catch (err: unknown) {
          if (err instanceof Error && err.message === "Unknown challenge type") {
@@ -246,7 +175,7 @@ export default function Home() {
              log(`⚠️ Unknown Challenge Type! Requesting Manual Input...`);
              setManualChallenge(challenge);
              if (walletAddr) {
-                 setChallengeData({ endpoints, walletAddr, challengeId: cData.challengeId });
+                 setChallengeData({ apiBase, walletAddr, challengeId: cData.challengeId });
              }
              setLoading(false); // Stop loading spinner so user can interact
              return; // Exit and wait for user input
@@ -267,7 +196,7 @@ export default function Home() {
       if (!manualAnswer || !challengeData) return;
       setLoading(true);
       try {
-          await submitAnswer(challengeData.endpoints, challengeData.walletAddr, challengeData.challengeId, manualAnswer);
+          await submitAnswer(challengeData.apiBase, challengeData.walletAddr, challengeData.challengeId, manualAnswer);
           setManualChallenge(null); // Clear manual mode
       } catch (e: unknown) {
           console.error(e);
@@ -278,10 +207,10 @@ export default function Home() {
       }
   };
 
-  const submitAnswer = async (endpoints: Endpoints, walletAddr: string, challengeId: string, answer: string | number) => {
+  const submitAnswer = async (apiBase: string, walletAddr: string, challengeId: string, answer: string | number) => {
       // 5. Submit Answer
       log("📤 Submitting...");
-      const mRes = await fetchProxy(endpoints.mint, {
+      const mRes = await fetchProxy(`${apiBase}/villain/agent-mint`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -317,31 +246,8 @@ export default function Home() {
           log("🚀 Executing Mint...");
           const mintTx = VersionedTransaction.deserialize(txBuffer);
           const signedTx = await signSolTx!(mintTx);
-
-          if (endpoints.execute) {
-              // 3-Step Flow (Clawgles)
-              log("🚀 Submitting Signed Transaction to Agent...");
-              const signedBase64 = Buffer.from(signedTx.serialize()).toString("base64");
-              
-              const eRes = await fetchProxy(endpoints.execute, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                      transaction: signedBase64,
-                      nftMint: mData.nftMint
-                  })
-              });
-              const eData = await eRes.json();
-              if (eData.signature) {
-                  log(`🎉 Success! Tx: https://solscan.io/tx/${eData.signature}`);
-              } else {
-                  log(`⚠️ Finished, but no signature returned: ${JSON.stringify(eData)}`);
-              }
-          } else {
-              // Standard Flow
-              const sig = await connection.sendRawTransaction(signedTx.serialize());
-              log(`🎉 Success! Tx: https://solscan.io/tx/${sig}`);
-          }
+          const sig = await connection.sendRawTransaction(signedTx.serialize());
+          log(`🎉 Success! Tx: https://solscan.io/tx/${sig}`);
 
       } else {
           // --- EVM FLOW ---
@@ -372,6 +278,8 @@ export default function Home() {
               throw new Error("Unknown EVM Transaction format from backend");
           }
       }
+
+      // setStatus("success"); // Removed as per cleanup
   };
 
   return (
@@ -430,26 +338,6 @@ export default function Home() {
           <p className="text-xs text-neutral-500">
             Fee: {mode === "solana" ? `${FEE_AMOUNT_SOL} SOL` : `${FEE_AMOUNT_ETH} ETH`} (Support the developer)
           </p>
-
-          {/* Advanced Settings: RPC */}
-          <div className="pt-2">
-              <label className="block text-xs font-medium text-neutral-500 mb-1">Custom RPC URL (Optional - Fixes 429/403 Errors)</label>
-              <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    value={rpcUrl}
-                    onChange={(e) => saveRpc(e.target.value)}
-                    className="flex-1 bg-neutral-900 border border-neutral-800 rounded px-3 py-2 text-sm text-neutral-300 focus:outline-none focus:border-emerald-500 transition-colors"
-                    placeholder="https://mainnet.helius-rpc.com/..."
-                  />
-                  <button 
-                    onClick={() => window.location.reload()}
-                    className="px-3 py-2 bg-neutral-800 text-neutral-400 text-xs rounded hover:bg-neutral-700 hover:text-white transition-colors"
-                  >
-                    Apply
-                  </button>
-              </div>
-          </div>
         </div>
 
         {/* Manual Challenge Input */}
