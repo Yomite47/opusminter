@@ -32,9 +32,9 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   const [endpoint, setEndpoint] = React.useState(clusterApiUrl(network));
 
   React.useEffect(() => {
-    const customRpc = localStorage.getItem("custom_rpc_url");
-    if (customRpc) {
-        setEndpoint(customRpc);
+    // Use local proxy to manage rate limits and hide API keys
+    if (typeof window !== 'undefined') {
+       setEndpoint(`${window.location.origin}/api/rpc`);
     }
   }, []);
 

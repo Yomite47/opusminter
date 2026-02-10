@@ -42,23 +42,9 @@ export default function Home() {
 
   // UI State
   const [url, setUrl] = useState("https://chum-production.up.railway.app/api/villain/skill.md");
-  const [rpcUrl, setRpcUrl] = useState(""); // Custom RPC
   const [logs, setLogs] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<"solana" | "evm">("solana"); // Toggle modes
-
-  // Load RPC from storage
-  useState(() => {
-      if (typeof window !== 'undefined') {
-          const stored = localStorage.getItem("custom_rpc_url");
-          if (stored) setRpcUrl(stored);
-      }
-  });
-
-  const saveRpc = (val: string) => {
-      setRpcUrl(val);
-      localStorage.setItem("custom_rpc_url", val);
-  };
 
   // Manual Challenge Solver State
   const [manualChallenge, setManualChallenge] = useState<string | null>(null);
@@ -430,26 +416,6 @@ export default function Home() {
           <p className="text-xs text-neutral-500">
             Fee: {mode === "solana" ? `${FEE_AMOUNT_SOL} SOL` : `${FEE_AMOUNT_ETH} ETH`} (Support the developer)
           </p>
-
-          {/* Advanced Settings: RPC */}
-          <div className="pt-2">
-              <label className="block text-xs font-medium text-neutral-500 mb-1">Custom RPC URL (Optional - Fixes 429/403 Errors)</label>
-              <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    value={rpcUrl}
-                    onChange={(e) => saveRpc(e.target.value)}
-                    className="flex-1 bg-neutral-900 border border-neutral-800 rounded px-3 py-2 text-sm text-neutral-300 focus:outline-none focus:border-emerald-500 transition-colors"
-                    placeholder="https://mainnet.helius-rpc.com/..."
-                  />
-                  <button 
-                    onClick={() => window.location.reload()}
-                    className="px-3 py-2 bg-neutral-800 text-neutral-400 text-xs rounded hover:bg-neutral-700 hover:text-white transition-colors"
-                  >
-                    Apply
-                  </button>
-              </div>
-          </div>
         </div>
 
         {/* Manual Challenge Input */}
